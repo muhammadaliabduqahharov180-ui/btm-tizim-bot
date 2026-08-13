@@ -41,12 +41,6 @@ SERVICES = {
                 "amount": 2_500_000,
                 "months": 6,
             },
-            {
-                "id": "plan12",
-                "label": "🔢 12 oyga bo'lib (1,250,000 so'm/oy)",
-                "amount": 1_250_000,
-                "months": 12,
-            },
         ],
     },
     "konsultatsiya": {

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -17,14 +18,17 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardRemove,
+    BufferedInputFile,
 )
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 from openai import OpenAI
 
 import db
+import sheets
+from qr import generate_qr_png
 from services import SERVICES, get_service, get_plan
-from config import CARD_NUMBER, CARD_HOLDER, PLATFORMS
+from config import CARD_NUMBER, CARD_HOLDER, PLATFORMS, GOOGLE_FORM_URL, REGIONS
 from ai_prompt import AI_SYSTEM_CONTEXT
 from video_library import find_video_for_text
 
@@ -72,6 +76,10 @@ groq_client = (
 # murojaat qilmaslik uchun kerak.
 VIDEO_CACHE: dict = {}
 
+# Botning o'z username'i — QR-kod ichidagi deep-link (t.me/<username>?start=...)
+# yaratish uchun kerak. main() da bot.get_me() orqali to'ldiriladi.
+BOT_USERNAME: str = ""
+
 
 async def ask_ai(chat_id: int, user_text: str) -> str:
     """Claude (afzal) yoki Groq (agar Claude kaliti yo'q bo'lsa) orqali javob oladi."""
@@ -91,6 +99,10 @@ async def ask_ai(chat_id: int, user_text: str) -> str:
         known_bits.append(f"ism = \"{lead['name']}\"")
     if lead.get("phone"):
         known_bits.append(f"telefon = \"{lead['phone']}\"")
+    if lead.get("region"):
+        known_bits.append(f"hudud = \"{lead['region']}\"")
+    if lead.get("mode"):
+        known_bits.append(f"format = \"{'onlayn' if lead['mode'] == 'online' else 'oflayn'}\"")
 
     if known_bits:
         lead_context = (
@@ -231,6 +243,60 @@ PLAN_LABELS = {
 }
 
 
+@dp.message(CommandStart(deep_link=True))
+async def handle_start_deep_link(message: Message, state: FSMContext, command: CommandObject):
+    """
+    /start ga payload (masalan checkin_<token>) qo'shib kelinganda ishlaydi —
+    hozircha faqat QR-kod orqali "kelganini belgilash" uchun ishlatiladi.
+    Bunday holatda oddiy lead-yig'ish oqimi (ism/telefon) ISHGA TUSHMAYDI.
+    """
+    payload = command.args or ""
+    if payload.startswith("checkin_"):
+        await handle_qr_checkin(message, payload[len("checkin_"):])
+        return
+    # Tanilmagan payload — oddiy /start sifatida davom ettiramiz
+    await handle_start(message, state)
+
+
+async def handle_qr_checkin(message: Message, token: str):
+    """QR-kod skanerlanib, bot /start checkin_<token> bilan ochilganda ishlaydi.
+    Faqat admin skanerlaganda ishlaydi (mijoz o'zi bossa, ma'no bermaydi)."""
+    if not _is_admin(message.chat.id):
+        await message.answer(
+            "Bu havola faqat tadbir ma'muri uchun mo'ljallangan."
+        )
+        return
+
+    result = await db.checkin_by_token(token)
+
+    if result is None:
+        await message.answer("⚠️ Noto'g'ri yoki topilmagan QR-kod.")
+        return
+
+    if result["already"]:
+        checked_at = result.get("checked_in_at")
+        when = checked_at.strftime("%d.%m.%Y %H:%M") if checked_at else "—"
+        await message.answer(
+            f"⚠️ <b>{result['name']}</b> allaqachon ro'yxatdan o'tgan ({when})."
+        , parse_mode="HTML")
+        return
+
+    await message.answer(
+        f"✅ <b>{result['name']}</b> muvaffaqiyatli ro'yxatdan o'tkazildi!\n"
+        f"📞 {result.get('phone', '—')}\n"
+        f"🎓 {result.get('title', '—')}",
+        parse_mode="HTML",
+    )
+
+    sheets.append_checkin_row([
+        datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M"),
+        result["name"],
+        result.get("phone", "—"),
+        result.get("title", "—"),
+        result.get("chat_id", "—"),
+    ])
+
+
 @dp.message(CommandStart())
 async def handle_start(message: Message, state: FSMContext):
     """Mijoz botga kirganda — avval ism so'raladi (lead yig'ish boshlanadi)."""
@@ -312,9 +378,11 @@ async def handle_leads(message: Message, command: CommandObject):
 
     for lead in leads:
         created = lead["created_at"].strftime("%d.%m.%Y %H:%M") if lead.get("created_at") else "—"
+        mode_label = "Onlayn" if lead.get("mode") == "online" else ("Oflayn" if lead.get("mode") else "—")
         lines.append(
             f"• <b>{lead.get('name') or '—'}</b> | {lead.get('phone') or '—'}\n"
             f"  F.I.Sh: {lead.get('full_name') or '—'} | {created}\n"
+            f"  Hudud: {lead.get('region') or '—'} | Format: {mode_label}\n"
             f"  Chat ID: <code>{lead['chat_id']}</code>"
         )
 
@@ -433,8 +501,71 @@ async def save_lead_phone_and_continue(message: Message, state: FSMContext, phon
         )
 
     await message.answer(
+        "Rahmat! ✅\n\nQaysi hududdansiz?",
+        reply_markup=build_region_keyboard(),
+    )
+
+
+def build_region_keyboard() -> InlineKeyboardMarkup:
+    """Hududlar ro'yxatini 2 ustunli inline klaviatura sifatida quradi."""
+    buttons = [
+        InlineKeyboardButton(text=region, callback_data=f"region:{i}")
+        for i, region in enumerate(REGIONS)
+    ]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@dp.callback_query(F.data.startswith("region:"))
+async def handle_region_choice(callback: CallbackQuery):
+    """Mijoz hududni tanlaganda — saqlaydi va onlayn/oflayn formatni so'raydi."""
+    try:
+        idx = int(callback.data.split(":", 1)[1])
+        region = REGIONS[idx]
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+
+    chat_id = callback.message.chat.id
+    await db.upsert_lead(chat_id, region=region)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer(f"{region} ✅")
+
+    mode_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="🟢 Onlayn", callback_data="mode:online"),
+            InlineKeyboardButton(text="🔵 Oflayn", callback_data="mode:oflayn"),
+        ]]
+    )
+    await callback.message.answer(
+        "Xizmatlardan onlayn yoki oflayn foydalanishni afzal ko'rasiz?",
+        reply_markup=mode_keyboard,
+    )
+
+
+@dp.callback_query(F.data.startswith("mode:"))
+async def handle_mode_choice(callback: CallbackQuery):
+    """Mijoz onlayn/oflayn formatni tanlaganda — saqlaydi, lead yig'ish yakunlanadi."""
+    mode = callback.data.split(":", 1)[1]
+    chat_id = callback.message.chat.id
+
+    await db.upsert_lead(chat_id, mode=mode)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer("Saqlandi ✅")
+
+    lead = await db.get_lead(chat_id)
+    sheets.append_lead_row([
+        datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M"),
+        lead.get("name", "—"),
+        lead.get("phone", "—"),
+        lead.get("region", "—"),
+        "Onlayn" if mode == "online" else "Oflayn",
+        f"@{callback.from_user.username}" if callback.from_user.username else "—",
+        chat_id,
+    ])
+
+    await callback.message.answer(
         "Rahmat! ✅\n\nPastdagi menyudan kerakli bo'limni tanlang 👇",
-        parse_mode="HTML",
         reply_markup=await get_menu_keyboard_for(chat_id),
     )
 
@@ -488,12 +619,18 @@ async def send_inquiry_to_admin(chat_id: int, service: dict):
             parse_mode="HTML",
         )
 
+    form_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="📝 Ariza to'ldirish", url=GOOGLE_FORM_URL)
+        ]]
+    )
     await bot.send_message(
         chat_id,
         f"✅ <b>{service['title']}</b>\n\n"
         f"{service['note']}\n\n"
-        f"Arizangiz qabul qilindi, tez orada siz bilan bog'lanamiz. 🙏",
+        f"To'liq ariza qoldirish uchun quyidagi formani to'ldiring 👇",
         parse_mode="HTML",
+        reply_markup=form_keyboard,
     )
 
 
@@ -794,12 +931,32 @@ async def handle_admin_decision(callback: CallbackQuery):
         )
 
         if pending:
-            await db.record_payment_decision(
+            payment_id = await db.record_payment_decision(
                 customer_chat_id,
                 pending.get("title"),
                 pending.get("amount"),
                 "approved",
             )
+
+            # To'lov tasdiqlangach — mijozga tadbirga kirish uchun QR-kod
+            # yuboramiz. Tadbirda admin shu QR-kodni skanerlab, kelganini
+            # belgilaydi (kamera orqali ochilgan deep-link /start orqali).
+            if payment_id and BOT_USERNAME:
+                token = uuid.uuid4().hex[:12]
+                await db.set_payment_qr_token(payment_id, token)
+                qr_link = f"https://t.me/{BOT_USERNAME}?start=checkin_{token}"
+                qr_bytes = generate_qr_png(qr_link)
+                try:
+                    await bot.send_photo(
+                        customer_chat_id,
+                        BufferedInputFile(qr_bytes, filename="qr.png"),
+                        caption=(
+                            "🎫 Bu QR-kodni tadbir/seminar kuni o'zingiz bilan olib "
+                            "keling — kirishda ko'rsatasiz."
+                        ),
+                    )
+                except Exception as e:
+                    logging.error(f"QR-kod yuborishda xato: {e}")
 
         # Agar bu seminar uchun to'lov bo'lsa — eslatmalar va follow-up
         # xabarlarini avtomatik rejalashtiramiz
@@ -1019,8 +1176,10 @@ async def handle_ai_fallback(message: Message):
 
 async def main():
     await db.init_pool()
-    global VIDEO_CACHE
+    global VIDEO_CACHE, BOT_USERNAME
     VIDEO_CACHE = await db.get_video_library()
+    me = await bot.get_me()
+    BOT_USERNAME = me.username
     asyncio.create_task(seminar_message_worker())
     await dp.start_polling(bot)
 

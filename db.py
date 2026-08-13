@@ -62,6 +62,12 @@ async def _create_tables() -> None:
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();"
         )
         await conn.execute(
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS region TEXT;"
+        )
+        await conn.execute(
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS mode TEXT;"
+        )
+        await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS pending_payments (
                 chat_id BIGINT PRIMARY KEY,
@@ -123,6 +129,18 @@ async def _create_tables() -> None:
             """
         )
         await conn.execute(
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS qr_token TEXT;"
+        )
+        await conn.execute(
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS checked_in BOOLEAN NOT NULL DEFAULT FALSE;"
+        )
+        await conn.execute(
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMPTZ;"
+        )
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS payments_qr_token_idx ON payments (qr_token) WHERE qr_token IS NOT NULL;"
+        )
+        await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS scheduled_seminar_messages (
                 chat_id BIGINT NOT NULL,
@@ -149,7 +167,8 @@ async def get_lead(chat_id: int) -> dict:
         return {}
     async with _pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT name, phone, full_name, username, source_service FROM leads WHERE chat_id = $1",
+            "SELECT name, phone, full_name, username, source_service, region, mode "
+            "FROM leads WHERE chat_id = $1",
             chat_id,
         )
         if not row:
@@ -345,18 +364,72 @@ async def mark_seminar_message_sent(chat_id: int, kind: str) -> None:
 
 # ------------------------------------------------------------- PAYMENTS ----
 
-async def record_payment_decision(chat_id: int, title: str, amount: int, status: str) -> None:
-    """Har bir 'Tasdiqlash'/'Rad etish' qarorini tarixga yozib boradi (statistika uchun)."""
+async def record_payment_decision(chat_id: int, title: str, amount: int, status: str) -> int | None:
+    """Har bir 'Tasdiqlash'/'Rad etish' qarorini tarixga yozib boradi (statistika uchun).
+    Yangi yozuv id'sini qaytaradi (QR-kod tokenini ulash uchun kerak bo'ladi)."""
     if not _connected():
-        return
+        return None
     async with _pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO payments (chat_id, title, amount, status) VALUES ($1, $2, $3, $4)",
+        row = await conn.fetchrow(
+            "INSERT INTO payments (chat_id, title, amount, status) VALUES ($1, $2, $3, $4) RETURNING id",
             chat_id,
             title,
             amount,
             status,
         )
+        return row["id"] if row else None
+
+
+# ---------------------------------------------------------- QR / CHECK-IN --
+
+async def set_payment_qr_token(payment_id: int, token: str) -> None:
+    """Tasdiqlangan to'lovga QR-kod tokenini bog'laydi."""
+    if not _connected():
+        return
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE payments SET qr_token = $1 WHERE id = $2", token, payment_id
+        )
+
+
+async def checkin_by_token(token: str) -> dict | None:
+    """
+    QR-kod skanerlanganda chaqiriladi. Token to'g'ri bo'lsa mijozni "kelgan" deb
+    belgilaydi va uning ma'lumotlarini qaytaradi. Token topilmasa None, avval
+    ishlatilgan bo'lsa already=True bilan qaytaradi.
+    """
+    if not _connected():
+        return None
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, chat_id, title, checked_in, checked_in_at "
+            "FROM payments WHERE qr_token = $1",
+            token,
+        )
+        if not row:
+            return None
+
+        lead = await get_lead(row["chat_id"])
+        display_name = lead.get("full_name") or lead.get("name") or "Noma'lum"
+
+        if row["checked_in"]:
+            return {
+                "already": True,
+                "name": display_name,
+                "checked_in_at": row["checked_in_at"],
+            }
+
+        await conn.execute(
+            "UPDATE payments SET checked_in = TRUE, checked_in_at = now() WHERE id = $1",
+            row["id"],
+        )
+        return {
+            "already": False,
+            "name": display_name,
+            "phone": lead.get("phone", "—"),
+            "title": row["title"],
+            "chat_id": row["chat_id"],
+        }
 
 
 # ------------------------------------------------------------- STATS/ADMIN --
@@ -413,7 +486,7 @@ async def list_leads(limit: int = 10, offset: int = 0, search: str | None = None
             pattern = f"%{search}%"
             rows = await conn.fetch(
                 """
-                SELECT chat_id, name, phone, full_name, source_service, created_at
+                SELECT chat_id, name, phone, full_name, source_service, region, mode, created_at
                 FROM leads
                 WHERE name ILIKE $1 OR phone ILIKE $1 OR full_name ILIKE $1
                 ORDER BY created_at DESC
@@ -426,7 +499,7 @@ async def list_leads(limit: int = 10, offset: int = 0, search: str | None = None
         else:
             rows = await conn.fetch(
                 """
-                SELECT chat_id, name, phone, full_name, source_service, created_at
+                SELECT chat_id, name, phone, full_name, source_service, region, mode, created_at
                 FROM leads
                 ORDER BY created_at DESC
                 LIMIT $1 OFFSET $2
