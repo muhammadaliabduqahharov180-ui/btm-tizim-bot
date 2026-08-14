@@ -48,6 +48,7 @@ SEMINAR_REMINDER_HOURS_TAG = "seminar_reminder_hours"
 SEMINAR_FOLLOWUP_VIDEO_TAG = "seminar_followup_video"
 PAYMENT_APPROVED_VIDEO_TAG = "payment_approved_note"
 PAYMENT_REJECTED_VIDEO_TAG = "payment_rejected_note"
+RECEIPT_RECEIVED_VIDEO_TAG = "receipt_received_note"
 
 # Admin dumaloq video yuborganda caption'da yozadigan qisqa so'z -> ichki teg
 VIDEO_NOTE_TAG_MAP = {
@@ -57,6 +58,7 @@ VIDEO_NOTE_TAG_MAP = {
     "followup": SEMINAR_FOLLOWUP_VIDEO_TAG,
     "payment_approved": PAYMENT_APPROVED_VIDEO_TAG,
     "payment_rejected": PAYMENT_REJECTED_VIDEO_TAG,
+    "receipt_received": RECEIPT_RECEIVED_VIDEO_TAG,
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -407,6 +409,7 @@ ADMIN_VIDEO_COMMANDS = {
     "setfollowupvideo": SEMINAR_FOLLOWUP_VIDEO_TAG,
     "setpaymentapproved": PAYMENT_APPROVED_VIDEO_TAG,
     "setpaymentrejected": PAYMENT_REJECTED_VIDEO_TAG,
+    "setreceiptvideo": RECEIPT_RECEIVED_VIDEO_TAG,
 }
 
 
@@ -427,6 +430,7 @@ async def handle_admin_video_tag_command(
     /setfollowupvideo   — seminardan keyingi kuni taassurot so'rash videosi
     /setpaymentapproved — to'lov TASDIQLANGANDA yuboriladigan video
     /setpaymentrejected — to'lovda MUAMMO bo'lganda (rad etilganda) yuboriladigan video
+    /setreceiptvideo    — mijoz CHEK (skrinshot) yuborganda darhol yuboriladigan video
     """
     if not _is_admin(message.chat.id):
         return
@@ -786,8 +790,14 @@ async def handle_admin_welcome_video_note(message: Message):
 
     await message.answer(
         "✅ Dumaloq video saqlandi — endi /start bosgan har bir mijozga shu video avtomatik yuboriladi.\n\n"
-        "Boshqa turdagi dumaloq video (eslatma/follow-up) yuklamoqchi bo'lsangiz, "
-        "avval mos buyruqni yuboring: /setreminderday, /setreminderhours yoki /setfollowupvideo"
+        "⚠️ Agar bu video boshqa maqsad uchun edi (masalan chek qabul qilinganda yoki "
+        "to'lov tasdiqlanganda ko'rsatish uchun), avval mos buyruqni yuborib, SO'NG "
+        "videoni qayta yuboring:\n"
+        "/setwelcome — /start dagi xush kelibsiz videosi\n"
+        "/setreceiptvideo — mijoz chek yuborganda ko'rsatiladigan video\n"
+        "/setpaymentapproved — to'lov tasdiqlanganda ko'rsatiladigan video\n"
+        "/setpaymentrejected — to'lov rad etilganda ko'rsatiladigan video\n"
+        "/setreminderday, /setreminderhours, /setfollowupvideo — seminar eslatmalari"
     )
 
 
@@ -914,6 +924,7 @@ async def forward_payment_to_admin(chat_id: int):
         reply_markup=confirm_keyboard,
     )
 
+    await _send_seminar_video(chat_id, RECEIPT_RECEIVED_VIDEO_TAG)
     await bot.send_message(
         chat_id,
         "📨 Ma'lumotlaringiz qabul qilindi, tekshirilmoqda. Tez orada tasdiqlanadi. Rahmat! 🙏",
