@@ -765,7 +765,7 @@ async def handle_menu_guide(message: Message):
     videos = VIDEO_CACHE.get(INSTRUCTION_VIDEO_TAG)
     if videos:
         try:
-            await bot.send_video_note(message.chat.id, videos[0], protect_content=True)
+            await bot.send_video(message.chat.id, videos[0], protect_content=True)
         except Exception as e:
             logging.error(f"Qo'llanma videosini yuborishda xato: {e}")
     else:
@@ -791,6 +791,23 @@ async def handle_admin_tagged_video_note(message: Message, state: FSMContext):
         VIDEO_CACHE[tag].append(file_id)
 
     await message.answer(f"✅ Dumaloq video saqlandi ({tag}).")
+
+
+@dp.message(AdminVideoUpload.waiting_note, F.video)
+async def handle_admin_tagged_regular_video(message: Message, state: FSMContext):
+    """Yuqoridagi buyruqlardan biri bosilgach kelgan ODDIY (to'rtburchak)
+    videoni saqlaydi — masalan qo'llanma videosi uchun ishlatiladi."""
+    data = await state.get_data()
+    tag = data.get("video_tag", WELCOME_VIDEO_NOTE_TAG)
+    await state.clear()
+
+    file_id = message.video.file_id
+    await db.add_video(tag, file_id)
+    VIDEO_CACHE.setdefault(tag, [])
+    if file_id not in VIDEO_CACHE[tag]:
+        VIDEO_CACHE[tag].append(file_id)
+
+    await message.answer(f"✅ Video saqlandi ({tag}).")
 
 
 @dp.message(F.video_note)
@@ -1076,13 +1093,18 @@ async def _schedule_seminar_messages(chat_id: int) -> None:
 
 
 async def _send_seminar_video(chat_id: int, tag: str) -> None:
-    """Bor bo'lsa, mos dumaloq videoni yuboradi (yo'q bo'lsa jim o'tkazib yuboradi)."""
+    """Bor bo'lsa, mos videoni yuboradi (yo'q bo'lsa jim o'tkazib yuboradi).
+    INSTRUCTION_VIDEO_TAG oddiy (to'rtburchak) video sifatida, qolgan barcha
+    turkumlar an'anaviy dumaloq (video note) sifatida yuboriladi."""
     videos = VIDEO_CACHE.get(tag)
     if videos:
         try:
-            await bot.send_video_note(chat_id, videos[0], protect_content=True)
+            if tag == INSTRUCTION_VIDEO_TAG:
+                await bot.send_video(chat_id, videos[0], protect_content=True)
+            else:
+                await bot.send_video_note(chat_id, videos[0], protect_content=True)
         except Exception as e:
-            logging.error(f"Seminar videosini yuborishda xato ({tag}): {e}")
+            logging.error(f"Video yuborishda xato ({tag}): {e}")
 
 
 async def send_seminar_reminder_day(chat_id: int) -> None:
