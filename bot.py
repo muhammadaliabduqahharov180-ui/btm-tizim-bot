@@ -49,6 +49,7 @@ SEMINAR_FOLLOWUP_VIDEO_TAG = "seminar_followup_video"
 PAYMENT_APPROVED_VIDEO_TAG = "payment_approved_note"
 PAYMENT_REJECTED_VIDEO_TAG = "payment_rejected_note"
 RECEIPT_RECEIVED_VIDEO_TAG = "receipt_received_note"
+INSTRUCTION_VIDEO_TAG = "instruction_video"
 
 # Admin dumaloq video yuborganda caption'da yozadigan qisqa so'z -> ichki teg
 VIDEO_NOTE_TAG_MAP = {
@@ -59,6 +60,7 @@ VIDEO_NOTE_TAG_MAP = {
     "payment_approved": PAYMENT_APPROVED_VIDEO_TAG,
     "payment_rejected": PAYMENT_REJECTED_VIDEO_TAG,
     "receipt_received": RECEIPT_RECEIVED_VIDEO_TAG,
+    "instruction": INSTRUCTION_VIDEO_TAG,
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -193,6 +195,7 @@ MENU_SERVICES = "🎓 Xizmatlar"
 MENU_PAYMENTS = "💳 To'lovlar"
 MENU_CONTACT = "☎️ Biz bilan bog'lanish"
 MENU_LOCATION = "📍 Manzil"
+MENU_GUIDE = "📖 Qo'llanma"
 MENU_RESTART = "🔄 Qaytadan boshlash"
 MENU_BACK = "⬅️ Orqaga"
 
@@ -228,7 +231,7 @@ def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=MENU_SERVICES), KeyboardButton(text=MENU_PAYMENTS)],
             [KeyboardButton(text=MENU_CONTACT), KeyboardButton(text=MENU_LOCATION)],
-            [KeyboardButton(text=MENU_RESTART)],
+            [KeyboardButton(text=MENU_GUIDE), KeyboardButton(text=MENU_RESTART)],
         ],
         resize_keyboard=True,
     )
@@ -318,6 +321,9 @@ async def handle_start(message: Message, state: FSMContext):
             )
         except Exception as e:
             logging.error(f"Xush kelibsiz videosini yuborishda xato: {e}")
+
+    # Botdan qanday foydalanish haqida qo'llanma video (bor bo'lsa)
+    await _send_seminar_video(message.chat.id, INSTRUCTION_VIDEO_TAG)
 
     await message.answer(
         "Assalomu alaykum! 👋\n"
@@ -410,6 +416,7 @@ ADMIN_VIDEO_COMMANDS = {
     "setpaymentapproved": PAYMENT_APPROVED_VIDEO_TAG,
     "setpaymentrejected": PAYMENT_REJECTED_VIDEO_TAG,
     "setreceiptvideo": RECEIPT_RECEIVED_VIDEO_TAG,
+    "setinstructionvideo": INSTRUCTION_VIDEO_TAG,
 }
 
 
@@ -431,6 +438,7 @@ async def handle_admin_video_tag_command(
     /setpaymentapproved — to'lov TASDIQLANGANDA yuboriladigan video
     /setpaymentrejected — to'lovda MUAMMO bo'lganda (rad etilganda) yuboriladigan video
     /setreceiptvideo    — mijoz CHEK (skrinshot) yuborganda darhol yuboriladigan video
+    /setinstructionvideo — botdan qanday foydalanish haqida qo'llanma video
     """
     if not _is_admin(message.chat.id):
         return
@@ -751,6 +759,19 @@ async def handle_menu_location(message: Message):
         await message.answer("Manzil ma'lumoti hozircha kiritilmagan.")
 
 
+@dp.message(F.text == MENU_GUIDE)
+async def handle_menu_guide(message: Message):
+    """Botdan qanday foydalanish haqida qo'llanma videoni yuboradi."""
+    videos = VIDEO_CACHE.get(INSTRUCTION_VIDEO_TAG)
+    if videos:
+        try:
+            await bot.send_video_note(message.chat.id, videos[0], protect_content=True)
+        except Exception as e:
+            logging.error(f"Qo'llanma videosini yuborishda xato: {e}")
+    else:
+        await message.answer("Qo'llanma videosi hozircha yuklanmagan.")
+
+
 @dp.message(F.text == MENU_RESTART)
 async def handle_menu_restart(message: Message, state: FSMContext):
     await handle_start(message, state)
@@ -797,6 +818,7 @@ async def handle_admin_welcome_video_note(message: Message):
         "/setreceiptvideo — mijoz chek yuborganda ko'rsatiladigan video\n"
         "/setpaymentapproved — to'lov tasdiqlanganda ko'rsatiladigan video\n"
         "/setpaymentrejected — to'lov rad etilganda ko'rsatiladigan video\n"
+        "/setinstructionvideo — qo'llanma (foydalanish yo'riqnomasi) videosi\n"
         "/setreminderday, /setreminderhours, /setfollowupvideo — seminar eslatmalari"
     )
 
