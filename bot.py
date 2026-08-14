@@ -935,6 +935,7 @@ async def forward_payment_to_admin(chat_id: int):
         return
 
     lead = await db.get_lead(chat_id)
+    mode_label = "Onlayn" if lead.get("mode") == "online" else ("Oflayn" if lead.get("mode") else "—")
     caption = (
         f"🆕 <b>Yangi to'lov tasdiqlash so'rovi</b>\n\n"
         f"Xizmat: {pending['title']}\n"
@@ -942,9 +943,22 @@ async def forward_payment_to_admin(chat_id: int):
         f"F.I.Sh (hisobot uchun): {lead.get('full_name', '—')}\n"
         f"Ism: {lead.get('name', '—')}\n"
         f"Telefon: {lead.get('phone', '—')}\n"
+        f"Hudud: {lead.get('region', '—')}\n"
+        f"Format: {mode_label}\n"
         f"Telegram: @{pending.get('username') or 'username yoq'}\n"
         f"Chat ID: {chat_id}"
     )
+
+    sheets.append_order_row([
+        datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M"),
+        lead.get("full_name") or lead.get("name", "—"),
+        lead.get("phone", "—"),
+        lead.get("region", "—"),
+        mode_label,
+        pending["title"],
+        pending["amount"],
+        "Kutilmoqda",
+    ])
 
     confirm_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -997,6 +1011,19 @@ async def handle_admin_decision(callback: CallbackQuery):
                 "approved",
             )
 
+            lead = await db.get_lead(customer_chat_id)
+            mode_label = "Onlayn" if lead.get("mode") == "online" else ("Oflayn" if lead.get("mode") else "—")
+            sheets.append_order_row([
+                datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M"),
+                lead.get("full_name") or lead.get("name", "—"),
+                lead.get("phone", "—"),
+                lead.get("region", "—"),
+                mode_label,
+                pending.get("title"),
+                pending.get("amount"),
+                "Tasdiqlandi",
+            ])
+
             # To'lov tasdiqlangach — mijozga tadbirga kirish uchun QR-kod
             # yuboramiz. Tadbirda admin shu QR-kodni skanerlab, kelganini
             # belgilaydi (kamera orqali ochilgan deep-link /start orqali).
@@ -1042,6 +1069,19 @@ async def handle_admin_decision(callback: CallbackQuery):
                 pending.get("amount"),
                 "rejected",
             )
+
+            lead = await db.get_lead(customer_chat_id)
+            mode_label = "Onlayn" if lead.get("mode") == "online" else ("Oflayn" if lead.get("mode") else "—")
+            sheets.append_order_row([
+                datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M"),
+                lead.get("full_name") or lead.get("name", "—"),
+                lead.get("phone", "—"),
+                lead.get("region", "—"),
+                mode_label,
+                pending.get("title"),
+                pending.get("amount"),
+                "Rad etildi",
+            ])
 
     await db.clear_pending(customer_chat_id)
 
