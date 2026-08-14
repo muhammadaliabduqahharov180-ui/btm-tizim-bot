@@ -46,6 +46,8 @@ WELCOME_VIDEO_NOTE_TAG = "welcome_note"
 SEMINAR_REMINDER_DAY_TAG = "seminar_reminder_day"
 SEMINAR_REMINDER_HOURS_TAG = "seminar_reminder_hours"
 SEMINAR_FOLLOWUP_VIDEO_TAG = "seminar_followup_video"
+PAYMENT_APPROVED_VIDEO_TAG = "payment_approved_note"
+PAYMENT_REJECTED_VIDEO_TAG = "payment_rejected_note"
 
 # Admin dumaloq video yuborganda caption'da yozadigan qisqa so'z -> ichki teg
 VIDEO_NOTE_TAG_MAP = {
@@ -53,6 +55,8 @@ VIDEO_NOTE_TAG_MAP = {
     "reminder_day": SEMINAR_REMINDER_DAY_TAG,
     "reminder_hours": SEMINAR_REMINDER_HOURS_TAG,
     "followup": SEMINAR_FOLLOWUP_VIDEO_TAG,
+    "payment_approved": PAYMENT_APPROVED_VIDEO_TAG,
+    "payment_rejected": PAYMENT_REJECTED_VIDEO_TAG,
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -401,6 +405,8 @@ ADMIN_VIDEO_COMMANDS = {
     "setreminderday": SEMINAR_REMINDER_DAY_TAG,
     "setreminderhours": SEMINAR_REMINDER_HOURS_TAG,
     "setfollowupvideo": SEMINAR_FOLLOWUP_VIDEO_TAG,
+    "setpaymentapproved": PAYMENT_APPROVED_VIDEO_TAG,
+    "setpaymentrejected": PAYMENT_REJECTED_VIDEO_TAG,
 }
 
 
@@ -415,10 +421,12 @@ async def handle_admin_video_tag_command(
     handlerlaridan OLDIN turadi — aks holda agar admin biror bosqichda
     "qolib qolgan" bo'lsa, buyruq o'sha maydonga yozilib, jim yutilib
     ketishi mumkin edi.
-    /setwelcome        — /start dagi xush kelibsiz videosi
-    /setreminderday    — seminardan 1 kun oldingi eslatma
-    /setreminderhours  — seminar kunidagi eslatma (bir necha soat oldin)
-    /setfollowupvideo  — seminardan keyingi kuni taassurot so'rash videosi
+    /setwelcome         — /start dagi xush kelibsiz videosi
+    /setreminderday     — seminardan 1 kun oldingi eslatma
+    /setreminderhours   — seminar kunidagi eslatma (bir necha soat oldin)
+    /setfollowupvideo   — seminardan keyingi kuni taassurot so'rash videosi
+    /setpaymentapproved — to'lov TASDIQLANGANDA yuboriladigan video
+    /setpaymentrejected — to'lovda MUAMMO bo'lganda (rad etilganda) yuboriladigan video
     """
     if not _is_admin(message.chat.id):
         return
@@ -920,6 +928,7 @@ async def handle_admin_decision(callback: CallbackQuery):
     pending = await db.get_pending(customer_chat_id)
 
     if action == "approve":
+        await _send_seminar_video(customer_chat_id, PAYMENT_APPROVED_VIDEO_TAG)
         await bot.send_message(
             customer_chat_id,
             "✅ To'lovingiz tasdiqlandi!\n\nRahmat! Sizni kutib qolamiz 🙏",
@@ -963,6 +972,7 @@ async def handle_admin_decision(callback: CallbackQuery):
         if pending and pending.get("title") == SERVICES["seminar"]["title"]:
             await _schedule_seminar_messages(customer_chat_id)
     else:
+        await _send_seminar_video(customer_chat_id, PAYMENT_REJECTED_VIDEO_TAG)
         await bot.send_message(
             customer_chat_id,
             "❌ To'lovingiz tasdiqlanmadi.\n\n"
