@@ -754,7 +754,7 @@ async def handle_menu_location(message: Message):
             latitude=location["latitude"],
             longitude=location["longitude"],
         )
-        await message.answer(f"📍 Manzil: {location['address']}")
+        await message.answer(_build_address_line(location).strip(), parse_mode="HTML", disable_web_page_preview=True)
     else:
         await message.answer("Manzil ma'lumoti hozircha kiritilmagan.")
 
@@ -1152,27 +1152,42 @@ async def send_seminar_reminder_day(chat_id: int) -> None:
     await _send_seminar_video(chat_id, SEMINAR_REMINDER_DAY_TAG)
     location = SERVICES.get("seminar", {}).get("location", {})
     address = location.get("address", "")
+    address_line = _build_address_line(location)
     text = (
         "Assalomu alaykum! 👋\n\n"
         "Ertaga (shanba) soat <b>14:00</b> da seminarimiz bo'lib o'tadi — sizni "
-        "kutib qolamiz! 🎓\n\n" + (f"📍 Manzil: {address}\n\n" if address else "") +
+        "kutib qolamiz! 🎓\n\n" + address_line +
         "Ko'rishguncha!"
     )
-    await bot.send_message(chat_id, text, parse_mode="HTML")
+    await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def send_seminar_reminder_hours(chat_id: int) -> None:
     """Seminar kuni, boshlanishidan bir necha soat oldin yuboriladigan eslatma."""
     await _send_seminar_video(chat_id, SEMINAR_REMINDER_HOURS_TAG)
     location = SERVICES.get("seminar", {}).get("location", {})
-    address = location.get("address", "")
+    address_line = _build_address_line(location)
     text = (
         "Assalomu alaykum! 👋\n\n"
         "Bugun soat <b>14:00</b> da seminarimiz boshlanadi — bir necha soatdan "
-        "so'ng ko'rishamiz! 🎓\n\n" + (f"📍 Manzil: {address}\n\n" if address else "") +
+        "so'ng ko'rishamiz! 🎓\n\n" + address_line +
         "Vaqtida kelishni unutmang!"
     )
-    await bot.send_message(chat_id, text, parse_mode="HTML")
+    await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+
+
+def _build_address_line(location: dict) -> str:
+    """Manzilni (bor bo'lsa koordinatalar bilan) bosiladigan Google Maps
+    havolasiga aylantirib, tayyor matn qatorini qaytaradi."""
+    address = location.get("address", "")
+    if not address:
+        return ""
+    lat = location.get("latitude")
+    lng = location.get("longitude")
+    if lat is not None and lng is not None:
+        maps_url = f"https://maps.google.com/?q={lat},{lng}"
+        return f'📍 Manzil: <a href="{maps_url}">{address}</a>\n\n'
+    return f"📍 Manzil: {address}\n\n"
 
 
 SEMINAR_FEEDBACK_OPTIONS = [
