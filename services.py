@@ -43,6 +43,20 @@ SERVICES = {
             },
         ],
     },
+    "shogirtlik_online": {
+        "name": "💻 Biznes Shogirtlik dasturi (onlayn kurs)",
+        "title": "Biznes Shogirtlik dasturi (onlayn kurs)",
+        "type": "payment",
+        "plans": [
+            {"id": "full", "label": "💯 To'liq (12,000,000 so'm)", "amount": 12_000_000},
+            {
+                "id": "plan6",
+                "label": "🔢 6 oyga bo'lib (2,000,000 so'm/oy)",
+                "amount": 2_000_000,
+                "months": 6,
+            },
+        ],
+    },
     "konsultatsiya": {
         "name": "💼 Biznes Konsultatsiya",
         "title": "Biznes Konsultatsiya",

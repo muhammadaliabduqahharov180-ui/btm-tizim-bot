@@ -80,6 +80,24 @@ async def _create_tables() -> None:
             """
         )
         await conn.execute(
+            "ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS plan_months INT;"
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS installment_plans (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL,
+                service_title TEXT,
+                amount_per_month BIGINT,
+                total_months INT,
+                paid_months INT NOT NULL DEFAULT 1,
+                next_due_date DATE,
+                active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            """
+        )
+        await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ai_history (
                 chat_id BIGINT PRIMARY KEY,
@@ -203,13 +221,14 @@ async def set_pending(chat_id: int, **fields) -> None:
     async with _pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO pending_payments (chat_id, title, amount, screenshot_file_id, username)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO pending_payments (chat_id, title, amount, screenshot_file_id, username, plan_months)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (chat_id) DO UPDATE SET
                 title = COALESCE($2, pending_payments.title),
                 amount = COALESCE($3, pending_payments.amount),
                 screenshot_file_id = COALESCE($4, pending_payments.screenshot_file_id),
                 username = COALESCE($5, pending_payments.username),
+                plan_months = COALESCE($6, pending_payments.plan_months),
                 updated_at = now()
             """,
             chat_id,
@@ -217,6 +236,7 @@ async def set_pending(chat_id: int, **fields) -> None:
             fields.get("amount"),
             fields.get("screenshot_file_id"),
             fields.get("username"),
+            fields.get("plan_months"),
         )
 
 
@@ -225,7 +245,7 @@ async def get_pending(chat_id: int) -> dict | None:
         return None
     async with _pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT title, amount, screenshot_file_id, username "
+            "SELECT title, amount, screenshot_file_id, username, plan_months "
             "FROM pending_payments WHERE chat_id = $1",
             chat_id,
         )
@@ -237,6 +257,75 @@ async def clear_pending(chat_id: int) -> None:
         return
     async with _pool.acquire() as conn:
         await conn.execute("DELETE FROM pending_payments WHERE chat_id = $1", chat_id)
+
+
+# ------------------------------------------------------- INSTALLMENT PLANS --
+
+async def create_installment_plan(
+    chat_id: int, service_title: str, amount_per_month: int, total_months: int
+) -> None:
+    """To'lov tasdiqlangach (bo'lib to'lash rejasi tanlangan bo'lsa) chaqiriladi.
+    1-oy to'lovi hisobga olinadi, keyingi eslatma 1 oydan keyin rejalashtiriladi."""
+    if not _connected() or total_months <= 1:
+        return
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO installment_plans
+                (chat_id, service_title, amount_per_month, total_months, paid_months, next_due_date)
+            VALUES ($1, $2, $3, $4, 1, (CURRENT_DATE + INTERVAL '1 month')::date)
+            """,
+            chat_id,
+            service_title,
+            amount_per_month,
+            total_months,
+        )
+
+
+async def get_due_installments() -> list[dict]:
+    """Bugun (yoki undan oldin) to'lov muddati kelgan, hali faol bo'lgan rejalarni qaytaradi."""
+    if not _connected():
+        return []
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, chat_id, service_title, amount_per_month, total_months, paid_months
+            FROM installment_plans
+            WHERE active = TRUE AND next_due_date <= CURRENT_DATE
+            """
+        )
+        return [dict(r) for r in rows]
+
+
+async def advance_installment(plan_id: int) -> None:
+    """Eslatma yuborilgach chaqiriladi — keyingi oy uchun muddatni belgilaydi,
+    oxirgi oy bo'lsa rejani yakunlaydi (active=False)."""
+    if not _connected():
+        return
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT paid_months, total_months FROM installment_plans WHERE id = $1",
+            plan_id,
+        )
+        if not row:
+            return
+        new_paid = row["paid_months"] + 1
+        if new_paid >= row["total_months"]:
+            await conn.execute(
+                "UPDATE installment_plans SET paid_months = $2, active = FALSE WHERE id = $1",
+                plan_id,
+                new_paid,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE installment_plans
+                SET paid_months = $2, next_due_date = (CURRENT_DATE + INTERVAL '1 month')::date
+                WHERE id = $1
+                """,
+                plan_id,
+                new_paid,
+            )
 
 
 # ------------------------------------------------------------ AI HISTORY ----

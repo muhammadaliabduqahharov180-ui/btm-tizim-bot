@@ -666,7 +666,9 @@ async def handle_plan_text_choice(message: Message):
     else:
         title = f"{service['title']} (to'liq to'lov)"
 
-    await show_payment_screen(message.chat.id, title=title, amount=plan["amount"])
+    await show_payment_screen(
+        message.chat.id, title=title, amount=plan["amount"], plan_months=plan.get("months")
+    )
     await bot.send_message(
         message.chat.id,
         "Boshqa bo'lim kerak bo'lsa, pastdagi menyudan tanlang 👇",
@@ -674,11 +676,11 @@ async def handle_plan_text_choice(message: Message):
     )
 
 
-async def show_payment_screen(chat_id: int, title: str, amount: int):
+async def show_payment_screen(chat_id: int, title: str, amount: int, plan_months: int | None = None):
     """Karta raqami va Payme/Click/Uzum havolalarini ko'rsatadi."""
     # Yangi xizmat tanlanganda avvalgi (tugallanmagan) to'lov holatini tozalaymiz
     await db.clear_pending(chat_id)
-    await db.set_pending(chat_id, title=title, amount=amount)
+    await db.set_pending(chat_id, title=title, amount=amount, plan_months=plan_months)
 
     platform_buttons = [
         [InlineKeyboardButton(text=platform["name"], url=platform["url"])]
@@ -1011,6 +1013,16 @@ async def handle_admin_decision(callback: CallbackQuery):
                 "approved",
             )
 
+            # Agar bu bo'lib-to'lash rejasi bo'lsa — keyingi oylar uchun
+            # avtomatik to'lov eslatmalarini rejalashtiramiz.
+            if pending.get("plan_months"):
+                await db.create_installment_plan(
+                    customer_chat_id,
+                    pending.get("title"),
+                    pending.get("amount"),
+                    pending.get("plan_months"),
+                )
+
             lead = await db.get_lead(customer_chat_id)
             mode_label = "Onlayn" if lead.get("mode") == "online" else ("Oflayn" if lead.get("mode") else "—")
             sheets.append_order_row([
@@ -1258,7 +1270,8 @@ SEMINAR_MESSAGE_SENDERS = {
 
 
 async def seminar_message_worker() -> None:
-    """Fonda ishlab, vaqti kelgan seminar eslatma/follow-up xabarlarini yuboradi."""
+    """Fonda ishlab, vaqti kelgan seminar eslatma/follow-up xabarlarini yuboradi
+    va bo'lib-to'lash rejalari uchun oylik to'lov eslatmalarini jo'natadi."""
     while True:
         try:
             now = datetime.now(TASHKENT_TZ)
@@ -1274,7 +1287,35 @@ async def seminar_message_worker() -> None:
                     logging.error(f"Seminar xabari yuborishda xato (chat_id={chat_id}, kind={kind}): {e}")
         except Exception as e:
             logging.error(f"Seminar message worker xatosi: {e}")
+
+        try:
+            await _send_due_installment_reminders()
+        except Exception as e:
+            logging.error(f"Bo'lib-to'lash eslatmalari worker xatosi: {e}")
+
         await asyncio.sleep(1800)  # har 30 daqiqada tekshiradi
+
+
+async def _send_due_installment_reminders() -> None:
+    """Bo'lib-to'lash rejasida muddati kelgan oylik to'lovlar uchun mijozlarga
+    eslatma xabari yuboradi va keyingi oy uchun muddatni oldinga suradi."""
+    due_plans = await db.get_due_installments()
+    for plan in due_plans:
+        next_month_no = plan["paid_months"] + 1
+        text = (
+            f"🔔 <b>Eslatma: oylik to'lov vaqti keldi</b>\n\n"
+            f"Xizmat: {plan['service_title']}\n"
+            f"To'lov: {next_month_no}-oy / {plan['total_months']} oy\n"
+            f"Summa: {plan['amount_per_month']:,} so'm\n\n"
+            f"💳 Karta raqami: <code>{CARD_NUMBER}</code>\n"
+            f"👤 Karta egasi: {CARD_HOLDER}\n\n"
+            f"To'lov qilgach, chek skrinshotini shu yerga yuboring. 🙏"
+        )
+        try:
+            await bot.send_message(plan["chat_id"], text, parse_mode="HTML")
+            await db.advance_installment(plan["id"])
+        except Exception as e:
+            logging.error(f"Bo'lib-to'lash eslatmasini yuborishda xato (chat_id={plan['chat_id']}): {e}")
 
 
 @dp.message(F.text)
