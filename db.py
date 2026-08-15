@@ -384,6 +384,14 @@ async def add_video(tag: str, file_id: str) -> None:
         )
 
 
+async def clear_videos(tag: str) -> None:
+    """Berilgan turkumdagi barcha videolarni butunlay o'chiradi."""
+    if not _connected():
+        return
+    async with _pool.acquire() as conn:
+        await conn.execute("DELETE FROM videos WHERE tag = $1", tag)
+
+
 async def was_video_sent(chat_id: int, file_id: str) -> bool:
     if not _connected():
         return False

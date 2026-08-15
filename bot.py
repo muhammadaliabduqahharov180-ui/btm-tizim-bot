@@ -439,6 +439,7 @@ async def handle_admin_video_tag_command(
     /setpaymentrejected — to'lovda MUAMMO bo'lganda (rad etilganda) yuboriladigan video
     /setreceiptvideo    — mijoz CHEK (skrinshot) yuborganda darhol yuboriladigan video
     /setinstructionvideo — botdan qanday foydalanish haqida qo'llanma video
+    /removeinstructionvideo — qo'llanma videosini o'chiradi
     """
     if not _is_admin(message.chat.id):
         return
@@ -447,6 +448,16 @@ async def handle_admin_video_tag_command(
     await state.set_state(AdminVideoUpload.waiting_note)
     await state.update_data(video_tag=tag)
     await message.answer("Endi shu turkum uchun DUMALOQ videoni yuboring 🎥")
+
+
+@dp.message(Command("removeinstructionvideo"))
+async def handle_remove_instruction_video(message: Message):
+    """Qo'llanma (to'rtburchak) videosini butunlay o'chirib tashlaydi."""
+    if not _is_admin(message.chat.id):
+        return
+    await db.clear_videos(INSTRUCTION_VIDEO_TAG)
+    VIDEO_CACHE[INSTRUCTION_VIDEO_TAG] = []
+    await message.answer("🗑 Qo'llanma videosi o'chirildi. Yangisini yuklash uchun /setinstructionvideo dan foydalaning.")
 
 
 @dp.message(LeadForm.name, F.text, ~F.text.startswith("/"))
