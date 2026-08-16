@@ -440,6 +440,11 @@ async def handle_admin_video_tag_command(
     /setreceiptvideo    — mijoz CHEK (skrinshot) yuborganda darhol yuboriladigan video
     /setinstructionvideo — botdan qanday foydalanish haqida qo'llanma video
     /removeinstructionvideo — qo'llanma videosini o'chiradi
+
+    Har bir /set... buyrug'iga mos /remove... buyrug'i bor — masalan
+    /removefollowupvideo, /removewelcome, /removereminderday,
+    /removereminderhours, /removepaymentapproved, /removepaymentrejected,
+    /removereceiptvideo — shu turkumdagi video(lar)ni butunlay o'chiradi.
     """
     if not _is_admin(message.chat.id):
         return
@@ -458,6 +463,30 @@ async def handle_remove_instruction_video(message: Message):
     await db.clear_videos(INSTRUCTION_VIDEO_TAG)
     VIDEO_CACHE[INSTRUCTION_VIDEO_TAG] = []
     await message.answer("🗑 Qo'llanma videosi o'chirildi. Yangisini yuklash uchun /setinstructionvideo dan foydalaning.")
+
+
+# Har bir /set... buyrug'iga mos /remove... buyrug'i (masalan /setfollowupvideo -> /removefollowupvideo)
+REMOVE_VIDEO_COMMANDS = {
+    f"remove{cmd[3:]}": tag for cmd, tag in ADMIN_VIDEO_COMMANDS.items()
+}
+
+
+@dp.message(Command(*REMOVE_VIDEO_COMMANDS.keys()))
+async def handle_remove_video(message: Message, command: CommandObject):
+    """Berilgan turkumdagi videoni(lar)ni butunlay o'chiradi.
+
+    Masalan: /removefollowupvideo, /removewelcome, /removereminderday,
+    /removereminderhours, /removepaymentapproved, /removepaymentrejected,
+    /removereceiptvideo, /removeinstructionvideo (yuqoridagi maxsus handler
+    bilan bir xil natija beradi).
+    """
+    if not _is_admin(message.chat.id):
+        return
+
+    tag = REMOVE_VIDEO_COMMANDS[command.command]
+    await db.clear_videos(tag)
+    VIDEO_CACHE[tag] = []
+    await message.answer(f"🗑 '{tag}' turkumidagi video(lar) o'chirildi.")
 
 
 @dp.message(LeadForm.name, F.text, ~F.text.startswith("/"))
