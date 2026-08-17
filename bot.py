@@ -231,7 +231,7 @@ def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=MENU_SERVICES), KeyboardButton(text=MENU_PAYMENTS)],
             [KeyboardButton(text=MENU_CONTACT), KeyboardButton(text=MENU_LOCATION)],
-            [KeyboardButton(text=MENU_GUIDE), KeyboardButton(text=MENU_RESTART)],
+            [KeyboardButton(text=MENU_RESTART)],
         ],
         resize_keyboard=True,
     )
@@ -788,7 +788,7 @@ async def handle_menu_contact(message: Message):
             parse_mode="HTML",
         )
     await message.answer(
-        "✅ So'rovingiz qabul qilindi, tez orada siz bilan bog'lanamiz.\n\n"
+        "📞 Quyidagi ma'lumotlar orqali biz bilan bog'lanishingiz mumkin:\n\n"
         "📞 Telefon: +998 98 001 00 08\n"
         "✈️ Telegram: @tizim008"
     )
