@@ -732,11 +732,18 @@ async def show_payment_screen(chat_id: int, title: str, amount: int, plan_months
         chat_id,
         f"🧾 <b>{title}</b>\n"
         f"💰 Summa: {amount:,} so'm\n\n"
-        f"💳 Karta raqami: <code>{CARD_NUMBER}</code>\n"
+        f"💳 Karta raqami (pastdagi xabarga bosib nusxa oling 👇):",
+        parse_mode="HTML",
+    )
+    # Karta raqami ALOHIDA, faqat o'zidan iborat xabar sifatida yuboriladi —
+    # shunda mobil qurilmada ham bosib (tap) darhol nusxa olinadi.
+    await bot.send_message(chat_id, f"<code>{CARD_NUMBER}</code>", parse_mode="HTML")
+    await bot.send_message(
+        chat_id,
         f"👤 Karta egasi: {CARD_HOLDER}\n\n"
-        f"➡️ Quyidagi tugmalardan birini bosing, so'ng ilova ichida:\n"
+        f"➡️ Yuqoridagi raqamga bosing (nusxa olinadi), so'ng ilova ichida:\n"
         f"1️⃣ \"Kartaga o'tkazish\" yoki \"Perevod na kartu\" bo'limini toping\n"
-        f"2️⃣ Yuqoridagi karta raqamini kiriting\n"
+        f"2️⃣ Nusxa olingan karta raqamini joylashtiring (paste)\n"
         f"3️⃣ Summani kiritib, o'tkazmani tasdiqlang\n\n"
         f"✅ To'lov qilingach, <b>chek skrinshotini shu yerga yuboring</b>.",
         reply_markup=keyboard,
@@ -1347,12 +1354,19 @@ async def _send_due_installment_reminders() -> None:
             f"Xizmat: {plan['service_title']}\n"
             f"To'lov: {next_month_no}-oy / {plan['total_months']} oy\n"
             f"Summa: {plan['amount_per_month']:,} so'm\n\n"
-            f"💳 Karta raqami: <code>{CARD_NUMBER}</code>\n"
-            f"👤 Karta egasi: {CARD_HOLDER}\n\n"
-            f"To'lov qilgach, chek skrinshotini shu yerga yuboring. 🙏"
+            f"💳 Karta raqami (pastdagi xabarga bosib nusxa oling 👇):"
         )
         try:
             await bot.send_message(plan["chat_id"], text, parse_mode="HTML")
+            await bot.send_message(
+                plan["chat_id"], f"<code>{CARD_NUMBER}</code>", parse_mode="HTML"
+            )
+            await bot.send_message(
+                plan["chat_id"],
+                f"👤 Karta egasi: {CARD_HOLDER}\n\n"
+                f"To'lov qilgach, chek skrinshotini shu yerga yuboring. 🙏",
+                parse_mode="HTML",
+            )
             await db.advance_installment(plan["id"])
         except Exception as e:
             logging.error(f"Bo'lib-to'lash eslatmasini yuborishda xato (chat_id={plan['chat_id']}): {e}")
