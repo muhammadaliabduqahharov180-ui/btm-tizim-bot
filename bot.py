@@ -50,6 +50,8 @@ PAYMENT_APPROVED_VIDEO_TAG = "payment_approved_note"
 PAYMENT_REJECTED_VIDEO_TAG = "payment_rejected_note"
 RECEIPT_RECEIVED_VIDEO_TAG = "receipt_received_note"
 INSTRUCTION_VIDEO_TAG = "instruction_video"
+PAYMENT_TROUBLE_VIDEO_TAG = "payment_trouble_video"
+PAYMENT_TUTORIAL_VIDEO_TAG = "payment_tutorial_video"
 
 # Admin dumaloq video yuborganda caption'da yozadigan qisqa so'z -> ichki teg
 VIDEO_NOTE_TAG_MAP = {
@@ -61,6 +63,8 @@ VIDEO_NOTE_TAG_MAP = {
     "payment_rejected": PAYMENT_REJECTED_VIDEO_TAG,
     "receipt_received": RECEIPT_RECEIVED_VIDEO_TAG,
     "instruction": INSTRUCTION_VIDEO_TAG,
+    "payment_trouble": PAYMENT_TROUBLE_VIDEO_TAG,
+    "payment_tutorial": PAYMENT_TUTORIAL_VIDEO_TAG,
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -425,6 +429,8 @@ ADMIN_VIDEO_COMMANDS = {
     "setpaymentrejected": PAYMENT_REJECTED_VIDEO_TAG,
     "setreceiptvideo": RECEIPT_RECEIVED_VIDEO_TAG,
     "setinstructionvideo": INSTRUCTION_VIDEO_TAG,
+    "setpaymenttrouble": PAYMENT_TROUBLE_VIDEO_TAG,
+    "setpaymenttutorial": PAYMENT_TUTORIAL_VIDEO_TAG,
 }
 
 
@@ -447,6 +453,8 @@ async def handle_admin_video_tag_command(
     /setpaymentrejected — to'lovda MUAMMO bo'lganda (rad etilganda) yuboriladigan video
     /setreceiptvideo    — mijoz CHEK (skrinshot) yuborganda darhol yuboriladigan video
     /setinstructionvideo — botdan qanday foydalanish haqida qo'llanma video
+    /setpaymenttrouble — "to'lovda muammo bormi?" tugmasi bosilganda ko'rsatiladigan dumaloq video
+    /setpaymenttutorial — to'lov qanday qilinishini ko'rsatuvchi oddiy video
     /removeinstructionvideo — qo'llanma videosini o'chiradi
 
     Har bir /set... buyrug'iga mos /remove... buyrug'i bor — masalan
@@ -734,6 +742,9 @@ async def show_payment_screen(chat_id: int, title: str, amount: int, plan_months
         [InlineKeyboardButton(text=platform["name"], url=platform["url"])]
         for platform in PLATFORMS
     ]
+    platform_buttons.append(
+        [InlineKeyboardButton(text="❓ To'lovda muammo bormi?", callback_data="payment_trouble")]
+    )
     keyboard = InlineKeyboardMarkup(inline_keyboard=platform_buttons)
 
     await bot.send_message(
@@ -757,6 +768,22 @@ async def show_payment_screen(chat_id: int, title: str, amount: int, plan_months
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+
+
+@dp.callback_query(F.data == "payment_trouble")
+async def handle_payment_trouble(callback: CallbackQuery):
+    """Mijoz 'To'lovda muammo bormi?' tugmasini bosganda ishlaydi:
+    avval dumaloq tushuntirish videosi, keyin ~1 daqiqadan so'ng
+    to'lov qanday amalga oshirilishini ko'rsatuvchi oddiy video yuboriladi."""
+    await callback.answer()
+    chat_id = callback.message.chat.id
+    await _send_seminar_video(chat_id, PAYMENT_TROUBLE_VIDEO_TAG)
+
+    async def _send_tutorial_later():
+        await asyncio.sleep(60)
+        await _send_seminar_video(chat_id, PAYMENT_TUTORIAL_VIDEO_TAG)
+
+    asyncio.create_task(_send_tutorial_later())
 
 
 @dp.message(F.text == MENU_SERVICES)
@@ -1201,14 +1228,15 @@ async def _schedule_seminar_messages(chat_id: int) -> None:
 
 async def _send_seminar_video(chat_id: int, tag: str) -> None:
     """Bor bo'lsa, mos videoni yuboradi (yo'q bo'lsa jim o'tkazib yuboradi).
-    INSTRUCTION_VIDEO_TAG oddiy (to'rtburchak) video sifatida, qolgan barcha
-    turkumlar an'anaviy dumaloq (video note) sifatida yuboriladi. Agar mijozning
-    maxfiylik sozlamasi dumaloq videoni bloklasa (VOICE_MESSAGES_FORBIDDEN),
-    oddiy video sifatida qayta yuboriladi — shunda mijoz baribir ko'ra oladi."""
+    INSTRUCTION_VIDEO_TAG va PAYMENT_TUTORIAL_VIDEO_TAG oddiy (to'rtburchak)
+    video sifatida, qolgan barcha turkumlar an'anaviy dumaloq (video note)
+    sifatida yuboriladi. Agar mijozning maxfiylik sozlamasi dumaloq videoni
+    bloklasa (VOICE_MESSAGES_FORBIDDEN), oddiy video sifatida qayta yuboriladi
+    — shunda mijoz baribir ko'ra oladi."""
     videos = VIDEO_CACHE.get(tag)
     if not videos:
         return
-    if tag == INSTRUCTION_VIDEO_TAG:
+    if tag in (INSTRUCTION_VIDEO_TAG, PAYMENT_TUTORIAL_VIDEO_TAG):
         try:
             await bot.send_video(chat_id, videos[0], protect_content=True)
         except Exception as e:
@@ -1391,9 +1419,40 @@ async def _send_due_installment_reminders() -> None:
             logging.error(f"Bo'lib-to'lash eslatmasini yuborishda xato (chat_id={plan['chat_id']}): {e}")
 
 
+# Mijoz shu so'zlardan birini yozsa (masalan follow-up xabaridan keyin) —
+# bu ijobiy/qiziqish belgisi deb hisoblanadi va adminga xabar yuboriladi.
+POSITIVE_REPLY_KEYWORDS = ["olg'a", "olga", "kuch", "tayyorman", "roziman", "istayman"]
+
+
+def _contains_positive_keyword(text: str) -> str | None:
+    lowered = text.lower()
+    for kw in POSITIVE_REPLY_KEYWORDS:
+        if kw in lowered:
+            return kw
+    return None
+
+
 @dp.message(F.text)
 async def handle_ai_fallback(message: Message):
     """Boshqa hech qaysi handler mos kelmagan matnli xabarlar uchun — AI javob beradi."""
+    matched_keyword = _contains_positive_keyword(message.text)
+    if matched_keyword and ADMIN_CHAT_ID:
+        lead = await db.get_lead(message.chat.id)
+        try:
+            await bot.send_message(
+                ADMIN_CHAT_ID,
+                f"🔥 <b>Lead ijobiy javob berdi!</b>\n\n"
+                f"Kalit so'z: <code>{matched_keyword}</code>\n"
+                f"Xabar: {message.text}\n\n"
+                f"Ism: {lead.get('name') or lead.get('full_name') or '—'}\n"
+                f"Telefon: {lead.get('phone', '—')}\n"
+                f"Telegram: @{message.from_user.username or 'username yoq'}\n"
+                f"Chat ID: {message.chat.id}",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logging.error(f"Adminga ijobiy javob haqida xabar yuborishda xato: {e}")
+
     answer = await ask_ai(message.chat.id, message.text)
     await message.answer(answer)
 
