@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import tempfile
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -19,6 +20,7 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardRemove,
     BufferedInputFile,
+    FSInputFile,
 )
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
@@ -861,6 +863,61 @@ async def handle_menu_restart(message: Message, state: FSMContext):
     await handle_start(message, state)
 
 
+# Bu ikkita turkum ATAYLAB oddiy (to'rtburchak) video sifatida saqlanadi —
+# qolgan barcha turkumlar uchun ODDIY video yuborilsa ham, bot uni AVTOMATIK
+# dumaloq (video note) formatga o'tkazib saqlaydi (quyidagi ffmpeg funksiyasi).
+REGULAR_ONLY_VIDEO_TAGS = {INSTRUCTION_VIDEO_TAG, PAYMENT_TUTORIAL_VIDEO_TAG}
+
+
+async def _convert_regular_video_to_round_file_id(source_file_id: str) -> str | None:
+    """Oddiy (har qanday o'lchamdagi) videoni yuklab oladi, ffmpeg orqali
+    kvadrat (markazdan kesilgan) 480x480, 60 soniyagacha formatga o'tkazadi,
+    so'ng Telegram'ga dumaloq video (video note) sifatida qayta yuklab,
+    natijaviy file_id'ni qaytaradi. Muvaffaqiyatsiz bo'lsa None qaytaradi."""
+    if not ADMIN_CHAT_ID:
+        return None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, "input.mp4")
+        output_path = os.path.join(tmpdir, "output.mp4")
+
+        try:
+            file_obj = await bot.get_file(source_file_id)
+            await bot.download_file(file_obj.file_path, destination=input_path)
+        except Exception as e:
+            logging.error(f"Videoni yuklab olishda xato: {e}")
+            return None
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", input_path,
+                "-vf", "crop=min(iw\\,ih):min(iw\\,ih),scale=480:480",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                "-t", "60",
+                output_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logging.error(f"ffmpeg xatosi: {stderr.decode(errors='ignore')[-500:]}")
+                return None
+        except Exception as e:
+            logging.error(f"ffmpeg ishga tushirishda xato: {e}")
+            return None
+
+        try:
+            sent = await bot.send_video_note(
+                ADMIN_CHAT_ID, FSInputFile(output_path), protect_content=True
+            )
+            return sent.video_note.file_id
+        except Exception as e:
+            logging.error(f"Aylantirilgan videoni qayta yuklashda xato: {e}")
+            return None
+
+
 @dp.message(AdminVideoUpload.waiting_note, F.video_note)
 async def handle_admin_tagged_video_note(message: Message, state: FSMContext):
     """Yuqoridagi buyruqlardan biri bosilgach kelgan dumaloq videoni saqlaydi."""
@@ -880,18 +937,38 @@ async def handle_admin_tagged_video_note(message: Message, state: FSMContext):
 @dp.message(AdminVideoUpload.waiting_note, F.video)
 async def handle_admin_tagged_regular_video(message: Message, state: FSMContext):
     """Yuqoridagi buyruqlardan biri bosilgach kelgan ODDIY (to'rtburchak)
-    videoni saqlaydi — masalan qo'llanma videosi uchun ishlatiladi."""
+    videoni saqlaydi. Agar turkum dumaloq bo'lishi kerak bo'lsa (masalan
+    welcome, to'lov eslatmalari va h.k.), video AVTOMATIK dumaloq formatga
+    o'tkaziladi — admin oddiy fayl yuborishi kifoya."""
     data = await state.get_data()
     tag = data.get("video_tag", WELCOME_VIDEO_NOTE_TAG)
     await state.clear()
 
-    file_id = message.video.file_id
-    await db.add_video(tag, file_id)
-    VIDEO_CACHE.setdefault(tag, [])
-    if file_id not in VIDEO_CACHE[tag]:
-        VIDEO_CACHE[tag].append(file_id)
+    if tag in REGULAR_ONLY_VIDEO_TAGS:
+        file_id = message.video.file_id
+        await db.add_video(tag, file_id)
+        VIDEO_CACHE.setdefault(tag, [])
+        if file_id not in VIDEO_CACHE[tag]:
+            VIDEO_CACHE[tag].append(file_id)
+        await message.answer(f"✅ Video saqlandi ({tag}).")
+        return
 
-    await message.answer(f"✅ Video saqlandi ({tag}).")
+    processing_msg = await message.answer("⏳ Video dumaloq formatga o'tkazilmoqda, biroz kuting...")
+    round_file_id = await _convert_regular_video_to_round_file_id(message.video.file_id)
+
+    if not round_file_id:
+        await processing_msg.edit_text(
+            "❌ Videoni dumaloq formatga o'tkazishda xato yuz berdi. "
+            "Iltimos, qisqaroq (60 soniyagacha) video yuboring yoki qayta urinib ko'ring."
+        )
+        return
+
+    await db.add_video(tag, round_file_id)
+    VIDEO_CACHE.setdefault(tag, [])
+    if round_file_id not in VIDEO_CACHE[tag]:
+        VIDEO_CACHE[tag].append(round_file_id)
+
+    await processing_msg.edit_text(f"✅ Video dumaloq formatga o'tkazilib saqlandi ({tag}).")
 
 
 @dp.message(F.video_note)
