@@ -17,7 +17,14 @@ PLATFORMS = [
 
 # Narxi individual bo'lgan xizmatlar uchun (Konsultatsiya, Rahbarlar Kursi,
 # Tizimlashtirish) mijoz ariza to'ldiradigan Google Form havolasi.
-GOOGLE_FORM_URL = "https://forms.gle/RY4ux2hNEWC2nPqa9"
+# Har bir mijoz uchun shaxsiy (chat_id oldindan to'ldirilgan) havola
+# yaratish uchun asosiy (base) havola va "Telegram ID" savolining
+# entry ID'si alohida saqlanadi.
+GOOGLE_FORM_BASE_URL = (
+    "https://docs.google.com/forms/d/e/"
+    "1FAIpQLSdI3TiZtbVM6d_MowDap5YHG26pqb8KNRhlxnUBv7NxZQ9kVg/viewform"
+)
+GOOGLE_FORM_CHATID_ENTRY = "entry.351197641"
 
 # Mijozdan so'raladigan hududlar ro'yxati (lead intake bosqichida).
 REGIONS = [
