@@ -30,7 +30,14 @@ import db
 import sheets
 from qr import generate_qr_png
 from services import SERVICES, get_service, get_plan
-from config import CARD_NUMBER, CARD_HOLDER, PLATFORMS, GOOGLE_FORM_URL, REGIONS
+from config import (
+    CARD_NUMBER,
+    CARD_HOLDER,
+    PLATFORMS,
+    GOOGLE_FORM_BASE_URL,
+    GOOGLE_FORM_CHATID_ENTRY,
+    REGIONS,
+)
 from ai_prompt import AI_SYSTEM_CONTEXT
 from video_library import find_video_for_text
 
@@ -697,9 +704,15 @@ async def send_inquiry_to_admin(chat_id: int, service: dict):
             parse_mode="HTML",
         )
 
+    # Mijozning chat_id'si formaga oldindan to'ldirilgan holda uzatiladi —
+    # shu orqali Apps Script forma to'ldirilgach qaysi mijozga rahmat
+    # xabarini yuborishni biladi.
+    personal_form_url = (
+        f"{GOOGLE_FORM_BASE_URL}?usp=pp_url&{GOOGLE_FORM_CHATID_ENTRY}={chat_id}"
+    )
     form_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[[
-            InlineKeyboardButton(text="📝 Ariza to'ldirish", url=GOOGLE_FORM_URL)
+            InlineKeyboardButton(text="📝 Ariza to'ldirish", url=personal_form_url)
         ]]
     )
     await bot.send_message(
