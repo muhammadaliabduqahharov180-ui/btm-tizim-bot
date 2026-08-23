@@ -170,9 +170,19 @@ async def ask_ai(chat_id: int, user_text: str) -> str:
             response = groq_client.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=[{"role": "system", "content": system_message}] + history,
-                max_tokens=350,
+                max_tokens=800,
             )
-            answer = response.choices[0].message.content
+            answer = (response.choices[0].message.content or "").strip()
+
+        # Ba'zan model (ayniqsa Groq/gpt-oss) bo'sh javob qaytarishi mumkin —
+        # bunday holatda Telegram'ga bo'sh matn yuborilsa xato chiqib, mijozga
+        # umuman javob bormay qoladi. Shuning uchun zaxira matn beramiz.
+        if not answer:
+            logging.error("AI bo'sh javob qaytardi (chat_id=%s)", chat_id)
+            answer = (
+                "Kechirasiz, savolingizni to'liq tushunolmadim 🙏 "
+                "Iltimos, boshqacharoq so'zlar bilan qayta yozib ko'ring."
+            )
 
         history.append({"role": "assistant", "content": answer})
         await db.set_ai_history(chat_id, history)
