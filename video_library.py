@@ -33,5 +33,5 @@ def find_video_for_text(text: str, library: dict) -> str | None:
         if any(keyword in lowered for keyword in keywords):
             videos = library.get(topic)
             if videos:
-                return videos[0]
+                return videos[-1]
     return None

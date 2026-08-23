@@ -340,7 +340,7 @@ async def handle_start(message: Message, state: FSMContext):
     if welcome_notes:
         try:
             await bot.send_video_note(
-                message.chat.id, welcome_notes[0], protect_content=True
+                message.chat.id, welcome_notes[-1], protect_content=True
             )
         except Exception as e:
             logging.error(f"Xush kelibsiz videosini yuborishda xato: {e}")
@@ -348,7 +348,7 @@ async def handle_start(message: Message, state: FSMContext):
             # mumkin (VOICE_MESSAGES_FORBIDDEN) — oddiy video sifatida qayta urinamiz.
             try:
                 await bot.send_video(
-                    message.chat.id, welcome_notes[0], protect_content=True
+                    message.chat.id, welcome_notes[-1], protect_content=True
                 )
             except Exception as e2:
                 logging.error(f"Xush kelibsiz videosini (zaxira) yuborishda ham xato: {e2}")
@@ -874,7 +874,7 @@ async def handle_menu_guide(message: Message):
     videos = VIDEO_CACHE.get(INSTRUCTION_VIDEO_TAG)
     if videos:
         try:
-            await bot.send_video(message.chat.id, videos[0], protect_content=True)
+            await bot.send_video(message.chat.id, videos[-1], protect_content=True)
         except Exception as e:
             logging.error(f"Qo'llanma videosini yuborishda xato: {e}")
     else:
@@ -1336,19 +1336,20 @@ async def _send_seminar_video(chat_id: int, tag: str) -> None:
     videos = VIDEO_CACHE.get(tag)
     if not videos:
         return
+    latest = videos[-1]
     if tag in (INSTRUCTION_VIDEO_TAG, PAYMENT_TUTORIAL_VIDEO_TAG):
         try:
-            await bot.send_video(chat_id, videos[0], protect_content=True)
+            await bot.send_video(chat_id, latest, protect_content=True)
         except Exception as e:
             logging.error(f"Video yuborishda xato ({tag}): {e}")
         return
 
     try:
-        await bot.send_video_note(chat_id, videos[0], protect_content=True)
+        await bot.send_video_note(chat_id, latest, protect_content=True)
     except Exception as e:
         logging.error(f"Dumaloq video yuborishda xato ({tag}): {e}")
         try:
-            await bot.send_video(chat_id, videos[0], protect_content=True)
+            await bot.send_video(chat_id, latest, protect_content=True)
         except Exception as e2:
             logging.error(f"Video yuborishda (zaxira) ham xato ({tag}): {e2}")
 
