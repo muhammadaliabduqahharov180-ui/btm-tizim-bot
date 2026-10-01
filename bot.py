@@ -835,8 +835,16 @@ async def handle_menu_back(message: Message):
 @dp.message(F.text == MENU_CONTACT)
 async def handle_menu_contact(message: Message):
     chat_id = message.chat.id
+    lead = await db.get_lead(chat_id) or {}
+    sheets.append_request_row([
+        datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M"),
+        lead.get("name", "—"),
+        lead.get("phone", "—"),
+        lead.get("business", "—"),
+        chat_id,
+        "Yangi",
+    ])
     if ADMIN_CHAT_ID:
-        lead = await db.get_lead(chat_id)
         customer = message.from_user
         await bot.send_message(
             ADMIN_CHAT_ID,

@@ -114,6 +114,20 @@ def append_checkin_row(row: list) -> None:
         logging.error(f"Check-in qatorini Sheets'ga yozishda xato: {e}")
 
 
+def append_request_row(row: list) -> None:
+    """Bog'lanish so'rovlari (Arizalar) ro'yxatiga bitta qator qo'shadi:
+    [Sana, Ism, Telefon, Biznes, Chat ID, Holat]"""
+    ws = _get_or_create_worksheet(
+        "Arizalar", ["Sana", "Ism", "Telefon", "Biznes", "Chat ID", "Holat"]
+    )
+    if not ws:
+        return
+    try:
+        ws.append_row([str(x) if x is not None else "" for x in row])
+    except Exception as e:
+        logging.error(f"Ariza qatorini Sheets'ga yozishda xato: {e}")
+
+
 def append_order_row(row: list) -> None:
     """Buyurtma/to'lov so'rovlari ro'yxatiga bitta qator qo'shadi:
     [Sana, Ism, Telefon, Hudud, Format, Xizmat, Summa, Holat]"""
