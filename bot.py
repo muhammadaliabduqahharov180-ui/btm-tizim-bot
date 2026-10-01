@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import os
 import tempfile
 import uuid
@@ -126,7 +127,7 @@ async def ask_ai(chat_id: int, user_text: str) -> str:
     if lead.get("phone"):
         known_bits.append(f"telefon = \"{lead['phone']}\"")
     if lead.get("region"):
-        known_bits.append(f"hudud = \"{lead['region']}\"")
+        known_bits.append(f"shahar/hudud = \"{lead['region']}\"")
     if lead.get("mode"):
         known_bits.append(f"format = \"{'onlayn' if lead['mode'] == 'online' else 'oflayn'}\"")
 
@@ -137,7 +138,7 @@ async def ask_ai(chat_id: int, user_text: str) -> str:
             "\"telefon raqamingiz\" kabi savol bo'lsa ham, bu ma'lumotlar YUQORIDA "
             "ALLAQACHON BERILGAN — ularni IKKINCHI MARTA SO'RASH TAQIQLANADI. Kerak "
             "bo'lsa shu ismdan foydalan, telefon allaqachon bazada bor deb hisobla. "
-            "Faqat hali noma'lum bo'lgan narsalarni (shahar, faoliyat turi, daromad, "
+            "Shahar/hudud ma'lum bo'lsa uni ham qayta so'rama. Faqat hali noma'lum bo'lgan narsalarni (faoliyat turi, daromad, "
             "qaysi xizmatga qiziqishi va h.k.) so'ra."
         )
     else:
@@ -1550,9 +1551,57 @@ def _contains_positive_keyword(text: str) -> str | None:
     return None
 
 
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?998[\s\-()]*)?(\d{2})[\s\-()]*(\d{3})[\s\-]*(\d{2})[\s\-]*(\d{2})(?!\d)")
+# O'zbekiston mobil operator kodlari — daromad/summa kabi boshqa sonlarni
+# telefon deb adashtirmaslik uchun.
+_UZ_MOBILE_CODES = {"20", "33", "50", "55", "77", "88", "90", "91", "93", "94", "95", "97", "98", "99"}
+
+
+def _extract_uz_phone(text: str) -> str | None:
+    """Matndan O'zbekiston telefon raqamini topib, +998XXXXXXXXX ko'rinishida qaytaradi."""
+    for match in _PHONE_RE.finditer(text):
+        if match.group(1) in _UZ_MOBILE_CODES:
+            return "+998" + "".join(match.groups())
+    return None
+
+
+async def _save_phone_from_chat(message: Message, phone: str) -> None:
+    """AI suhbatida mijoz yozgan raqamni bazaga, Sheets'ga saqlaydi va adminga xabar beradi."""
+    chat_id = message.chat.id
+    lead = await db.get_lead(chat_id) or {}
+    if lead.get("phone") == phone:
+        return
+    await db.upsert_lead(chat_id, phone=phone)
+    sheets.append_request_row([
+        datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M"),
+        lead.get("name", "—"),
+        phone,
+        lead.get("business", "—"),
+        chat_id,
+        "AI suhbat",
+    ])
+    if ADMIN_CHAT_ID:
+        try:
+            await bot.send_message(
+                ADMIN_CHAT_ID,
+                f"📞 <b>AI suhbatida yangi raqam</b>\n\n"
+                f"Ism: {lead.get('name', '—')}\n"
+                f"Telefon: {phone}\n"
+                f"Telegram: @{message.from_user.username or 'username yoq'}\n"
+                f"Chat ID: {chat_id}",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logging.error(f"Adminga raqam haqida xabar yuborishda xato: {e}")
+
+
 @dp.message(F.text)
 async def handle_ai_fallback(message: Message):
     """Boshqa hech qaysi handler mos kelmagan matnli xabarlar uchun — AI javob beradi."""
+    phone = _extract_uz_phone(message.text)
+    if phone:
+        await _save_phone_from_chat(message, phone)
+
     matched_keyword = _contains_positive_keyword(message.text)
     if matched_keyword and ADMIN_CHAT_ID:
         lead = await db.get_lead(message.chat.id)
