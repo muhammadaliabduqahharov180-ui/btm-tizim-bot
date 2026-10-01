@@ -24,7 +24,7 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 import db
 import sheets
@@ -87,7 +87,12 @@ claude_client = (
     AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 )
 groq_client = (
-    OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+    AsyncOpenAI(
+        api_key=GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1",
+        max_retries=1,
+        timeout=30,
+    )
     if GROQ_API_KEY
     else None
 )
@@ -167,10 +172,14 @@ async def ask_ai(chat_id: int, user_text: str) -> str:
             )
             answer = response.content[0].text
         else:
-            response = groq_client.chat.completions.create(
+            # Groq bepul limiti (daqiqasiga token) tez tugamasligi uchun faqat
+            # oxirgi 10 ta xabar yuboriladi; reasoning_effort=low — model
+            # "o'ylash"ga tokenlarni sarflab, bo'sh javob qaytarmasligi uchun.
+            response = await groq_client.chat.completions.create(
                 model=GROQ_MODEL,
-                messages=[{"role": "system", "content": system_message}] + history,
-                max_tokens=800,
+                messages=[{"role": "system", "content": system_message}] + history[-10:],
+                max_tokens=1000,
+                extra_body={"reasoning_effort": "low"},
             )
             answer = (response.choices[0].message.content or "").strip()
 
